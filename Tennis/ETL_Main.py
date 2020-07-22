@@ -18,8 +18,8 @@ def main():
     # LOAD LIBRARIES
     ######################################################################
     import sys
-    sys.path.insert(0, 'C:/Repo/Github/sports_analytics/Tenis/')
-    import TenisClassETL as etl
+    sys.path.insert(0, 'C:/Repo/Github/sports_analytics/Tennis/')
+    import TennisClassETL as etl
     import Inputs as inputs
     import Helpers as helpers
     import json

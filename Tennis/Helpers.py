@@ -9,7 +9,7 @@ from datetime import datetime
 import logging
 import os
 import sys
-sys.path.insert(0, 'C:/Repo/Github/sports_analytics/Tenis/')
+sys.path.insert(0, 'C:/Repo/Github/sports_analytics/Tennis/')
 import Inputs as inputs
 import logging
 import importlib
