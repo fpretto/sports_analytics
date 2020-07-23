@@ -1,0 +1,14 @@
+{
+  "general": {"master_path": "C:/GoogleDrive/LudisAI/",
+              "video_path" : "00 - Datasets/test_videos/",
+              "video_name" : "squash_euskal_serrano_gorka.mp4",
+              "username"   : "SerranoGorka"},
+
+  "sport_clf": {"model_path": "01 - Sport Classifier/",
+                "model"     : "squash_clasiffier.h5",
+                "labels"    : "label_binarizer"},
+
+  "player_tracking": {"model_path": "03 - Player Detection and Tracking/",
+                      "model"     : "yolo_model.h5"}
+
+}

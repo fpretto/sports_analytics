@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<style>
+
+<link rel="stylesheet" href="sheets-of-paper-a4.css">
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: 'Source Sans Pro', sans-serif;
+}
+
+
+.row::after {
+  content: "";
+  clear: both;
+  display: table;
+}
+
+[class*="col-"] {
+  float: left;
+  padding: 10px;
+}
+
+.col-1 {width: 8.33%;}
+.col-2 {width: 16.66%;}
+.col-3 {width: 25%;}
+.col-4 {width: 33.33%;}
+.col-5 {width: 41.66%;}
+.col-6 {width: 50%;}
+.col-7 {width: 58.33%;}
+.col-8 {width: 66.66%;}
+.col-9 {width: 75%;}
+.col-10 {width: 83.33%;}
+.col-11 {width: 91.66%;}
+.col-12 {width: 100%;}
+
+.header {
+  background-color: #0f3f76;
+  color: white;
+  padding: 0px;
+}
+
+.page[size="A4"] {
+  width: 21cm;
+  height: 29.7cm;
+}
+
+footer {
+  background-color: #0f3f76;
+  padding: 10px;
+  text-align: center;
+  color: white;
+}
+</style>
+<head lang="en">
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+</head>
+
+<body>
+    <div class="header">
+        <div class="row">
+            <div class="col-12">
+                <h1>Squash Analytics Report</h1>
+                <p><b>Player:</b> {{ username }}</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-6">
+          <p><b>Video:</b> {{ video_name }}</p>
+        </div>
+        <div class="col-10">
+          <p style="text-align:right;"><b>Date:</b> {{ fecha }}</p>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+          <p style="text-align:center;"><i>The insights generated in this report are based on player movement around the court during the video</i></p>
+          <p style="text-align:center;"> {{ frame }} </p>
+        </div>
+    </div>
+
+
+    <div class="row">
+
+    </div>
+    <div class="row">
+        <h2>Summary</h2>
+        <p> Lorem ipsum -...................</p>
+        <p>   Resumen del analisis.</p>
+        <p></p>
+        <p>    Conclusiones.</p>
+        <p></p>
+        <p>  Benchmark.</p>
+        <p></p>
+        <p></p>
+        <p>  Recomendaciones</p>
+        </p>
+    </div>
+    <div class="row">
+    </div>
+    <div class="row">
+    </div>
+    <div class="row">
+    </div>
+    <footer>
+      <p>1/3</p>
+      <p>www.ludis.tech</p>
+    </footer>
+</body>
+</html>
