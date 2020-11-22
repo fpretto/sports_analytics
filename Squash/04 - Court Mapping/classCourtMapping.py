@@ -109,7 +109,7 @@ class CourtMapping:
 
         return base64.b64encode(img.getvalue())
 
-    def createHeatmap(self, coords, player, video_duration, bins=25):
+    def createHeatmap(self, coords, player, video_duration, bins=25, export=False):
 
         ## Heatmap plot
         court = self.court_img.copy()
@@ -127,7 +127,7 @@ class CourtMapping:
 
         plt.axis('off')
         # plt.title(f'Heatmap: Player {idx}',fontsize=15)
-        #plt.title(f'Heatmap: {player}', fontsize=15)
+        plt.title(f'Heatmap: {player}', fontsize=15)
         #plt.annotate(f'Court Coverage: {distTraveled} meters', (.19, .1), xycoords='figure fraction', fontsize=12)
         #plt.annotate(f'Speed: {speed} km/h', (.19, .08), xycoords='figure fraction', fontsize=12)
         #plt.show()

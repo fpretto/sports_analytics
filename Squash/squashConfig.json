@@ -1,14 +1,16 @@
 {
-  "general": {"master_path": "C:/GoogleDrive/LudisAI/",
-              "video_path" : "00 - Datasets/test_videos/",
-              "video_name" : "squash_euskal_serrano_gorka.mp4",
-              "username"   : "SerranoGorka"},
+	"input_video_name": "squash_beginner.mp4",
 
-  "sport_clf": {"model_path": "01 - Sport Classifier/",
-                "model"     : "squash_clasiffier.h5",
-                "labels"    : "label_binarizer"},
+	"root": "/media/sf_Google_Drive/LudisAI/",
 
-  "player_tracking": {"model_path": "03 - Player Detection and Tracking/",
-                      "model"     : "yolo_model.h5"}
+	"tree_datasets" : "00 - Datasets/",
+	"tree_clf": "01 - Sport Classifier/",
+	"tree_pl_detect": "02 - Player Detection and Tracking/",
+	"tree_mapping": "03 - Court Mapping/",
+	
+	"tree_utils": "99 - Utils/",
+	"tree_outputs": "99 - Ejecuciones/"
+
+
 
 }

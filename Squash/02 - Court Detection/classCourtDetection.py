@@ -123,12 +123,3 @@ class CourtDetection:
         cv2.destroyAllWindows()
 
         return self.src_pts
-
-
-#path = 'C:/Users/PrettoF/Desktop/testLudis/'
-
-#detector = CourtDetection()
-
-#detector.detectCourt(path, 'squash-trim.avi')
-
-# keep looping until the 'q' key is pressed

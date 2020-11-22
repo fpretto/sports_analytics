@@ -96,7 +96,7 @@ class ReportGeneration:
         points_3 = [np.squeeze(x) for x in players_coords if (Point(np.squeeze(x)).within(ellipse_3)) and (Point(np.squeeze(x)).within(ellipse_1) == False) and (Point(np.squeeze(x)).within(ellipse_2) == False)]
         points_4 = [np.squeeze(x) for x in players_coords if Point(np.squeeze(x)).within(ellipse_3) == False]
 
-        t_control_score = round((len(points_1)*7 + len(points_2)*5 + len(points_3)*3 - len(points_4)*5) / (len(players_coords)*5)*100, 2)
+        t_control_score = round((len(points_1)*6 + len(points_2)*5 + len(points_3)*3 - len(points_4)*3) / (len(players_coords)*3)*100, 2)
         points = [points_1, points_2, points_3, points_4]
         return t_control_score, points
 

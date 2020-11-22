@@ -5,7 +5,11 @@ from keras.layers import Conv2D, Input, BatchNormalization, LeakyReLU, ZeroPaddi
 from keras.layers.merge import add, concatenate
 from keras.models import Model
 from shapely.geometry import Point, Polygon
-from sklearn.metrics.pairwise import cosine_similarity
+
+from colormath.color_objects import sRGBColor, LabColor
+from colormath.color_conversions import convert_color
+from colormath.color_diff import delta_e_cie2000
+
 import struct
 import cv2
 import sys
@@ -392,6 +396,27 @@ def do_nms(boxes, nms_thresh):
 
                 if bbox_iou(boxes[index_i], boxes[index_j]) >= nms_thresh:
                     boxes[index_j].classes[c] = 0
+
+def compare_colours(color_A, color_B):
+    """
+    Calculates the similarity between two RGB colours using Delta-E distance metric in the CIE Lab colour space.
+    :param color_A: BGR colour vector A
+    :param color_B: BGR colour vector B
+    :return: Delta-E distance
+    """
+
+    # Get RGB decomposition
+    colorA_rgb = sRGBColor(color_A[2], color_A[1], color_A[0])
+    colorB_rgb = sRGBColor(color_B[2], color_B[1], color_B[0])
+
+    # Convert from RGB to Lab Colour Space
+    colorA_lab = convert_color(colorA_rgb, LabColor)
+    colorB_lab = convert_color(colorB_rgb, LabColor)
+
+    # Find the colour difference
+    delta_e = delta_e_cie2000(colorA_lab, colorB_lab)
+
+    return delta_e
                     
 def draw_boxes(image, frame_n, boxes, labels, obj_thresh, court_pts, dict_players, player=None):
     """
@@ -474,10 +499,15 @@ def draw_boxes(image, frame_n, boxes, labels, obj_thresh, court_pts, dict_player
                     #distA = np.sqrt(dist_player_pos_A + dist_lower_center_A + dist_mid_left_A + dist_center_A + dist_mid_right_A + dist_torso_A + dist_upper_center_A)
                     #distB = np.sqrt(dist_player_pos_B + dist_lower_center_B + dist_mid_left_B + dist_center_B + dist_mid_right_B + dist_torso_B + dist_upper_center_B)
 
-                    cosine_sim_A = cosine_similarity(image[(torso[1], torso[0])].reshape(1, -1), dict_players['player_A']['player_torso'][0].reshape(1, -1))
-                    cosine_sim_B = cosine_similarity(image[(torso[1], torso[0])].reshape(1, -1), dict_players['player_B']['player_torso'][0].reshape(1, -1))
+                    #cosine_sim_A = cosine_similarity(image[(torso[1], torso[0])].reshape(1, -1), dict_players['player_A']['player_torso'][0].reshape(1, -1))
+                    #cosine_sim_B = cosine_similarity(image[(torso[1], torso[0])].reshape(1, -1), dict_players['player_B']['player_torso'][0].reshape(1, -1))
 
-                    if (cosine_sim_A > cosine_sim_B):
+                    print(image[(torso[1], torso[0])])
+
+                    deltaE_A = compare_colours(image[(torso[1], torso[0])], dict_players['player_A']['player_torso'][0])
+                    deltaE_B = compare_colours(image[(torso[1], torso[0])], dict_players['player_B']['player_torso'][0])
+
+                    if (deltaE_A < deltaE_B):
                         label_str += dict_players['player_A']['label']
                         dict_players['player_A']['player_coords'].append(player_pos)
                         dict_players['player_A']['tracking_coords'].append(tracking_coords)
@@ -488,7 +518,11 @@ def draw_boxes(image, frame_n, boxes, labels, obj_thresh, court_pts, dict_player
                         dict_players['player_B']['tracking_coords'].append(tracking_coords) 
                         label = i
 
-        if (label >= 0) & ((player == label_str) | (player == None)):
+        if (label >= 0):# & ((player == label_str) | (player == None)):
+            if frame_n > 1:
+                print('frame: {} .. player: {} .. torso_frame: {} .. torso_A: {} .. torso_B: {} .. cos_sim_A: {} .. cos_sim_B: {}'.format(
+                        frame_n, label_str, image[(torso[1], torso[0])].reshape(1, -1), dict_players['player_A']['player_torso'][0].reshape(1, -1),
+                        dict_players['player_B']['player_torso'][0].reshape(1, -1), deltaE_A, deltaE_B))
             cv2.rectangle(image, (box.xmin,box.ymin), (box.xmax, box.ymax), (0,255,0), 3)
             cv2.putText(image,
                         label_str + ': ' + str(np.round(box.get_score(), 4)), 

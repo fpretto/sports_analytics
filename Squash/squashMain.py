@@ -20,6 +20,7 @@ import sys
 import importlib
 import pickle as pkl
 import cv2
+import json
 from datetime import datetime
 from keras.models import load_model
 
@@ -58,6 +59,13 @@ importlib.reload(utils)
 ##########################################################################
 #  DEFINITIONS
 ##########################################################################
+with open(cwd + 'parameterCatalog.json') as f:
+  paramsCatalog = json.load(f)
+
+master_path = paramsCatalog['general']['master_path']
+video_path = master_path + paramsCatalog['general']['video_path']
+video_name = paramsCatalog['general']['video_name']
+username = paramsCatalog['general']['username']
 
 path = master_path + '99 - Ejecuciones/'
 date = datetime.now().strftime('%d-%m-%Y')
@@ -103,6 +111,8 @@ CM = classCourtMapping.CourtMapping(court_img, court_coords)
 # Player Identification
 dictPlayers = PDT.identifyPlayers(video_path, video_name, dictPlayers, username, src_pts, output_path, video_name.split('.')[0] + date_suffix)
 
+dictPlayers['player_B']['label'] = 'Rodriguez'
+
 # Player Tracking
 start_time = datetime.now()
 dictPlayers, video_duration = PDT.detectPlayers(video_path, video_name, dictPlayers, username, src_pts, output_path, video_name.split('.')[0] + date_suffix, CM)
@@ -113,20 +123,20 @@ end_time-start_time
 #  COURT MAPPING
 ##########################################################################
 
-dictPlayers = pkl.load(open('C:/GoogleDrive/LudisAI/99 - Ejecuciones/squash-trim_20200602/03_player_coords_squash-trim_20200602.pkl', 'rb'))
+#dictPlayers = pkl.load(open('C:/GoogleDrive/LudisAI/99 - Ejecuciones/squash-trim_20200602/03_player_coords_squash-trim_20200602.pkl', 'rb'))
 
-heatmap = CM.createHeatmap(dictPlayers['player_A']['2d_court_coords'], username, 77, bins=25)
+heatmap = CM.createHeatmap(dictPlayers['player_A']['2d_court_coords'], username, video_duration, bins=15)
 
 ##########################################################################
 #  REPORT GENERATION
 ##########################################################################
 
-output_path = 'C:/GoogleDrive/LudisAI/99 - Ejecuciones/squash-trim_20200602/'
-username = 'Nick Matthew'
-video_name = 'squash-trim.avi'
+#output_path = 'C:/GoogleDrive/LudisAI/99 - Ejecuciones/squash-trim_20200602/'
+#username = 'Nick Matthew'
+#video_name = 'squash-trim.avi'
+#video_duration = 791.8620689655172
 
-
-video_duration = 791.8620689655172
+username = 'Matthew'
 
 RG = classStatsGeneration.ReportGeneration()
 RG.generateReport(dictPlayers, output_path, username, heatmap, video_name, video_duration, date)
@@ -136,9 +146,9 @@ dict_stats = RG.generateStats(dictPlayers['player_A']['2d_court_coords'], dictPl
 t_control_score, points = RG.calculateTControlScore(dictPlayers['player_A']['2d_court_coords'])
 RG.plotTControlScore(points)
 
-print(len(points[0]))
-print(len(points[1]))
-print(len(points[2]))
-print(len(points[3]))
+with open(output_path + '06_stats_' + username + '.json', 'w') as outfile:
+    json.dump(dict_stats, outfile)
 
-round((len(points[0]) + len(points[1])) / (len(dictPlayers['player_A']['2d_court_coords']))*100, 2)
+
+
+

@@ -26,32 +26,45 @@ class classSquashConfig:
         with open(cwd + 'squashConfig.json') as config_file:
             config = json.load(config_file)
 
-        # General
-        self.root = config['general']['master_path']
-        self.video_path = config['general']['video_path']
-        self.video_name = config['general']['video_name']
-        self.username = config['general']['username']
+        # Archivos
+        self._video_name = config['input_video_name']
 
-        # Sport Classifier
-        self.clf_path = config['sport_clf']['model_path']
-        self.clf_model = config['sport_clf']['model']
-        self.clf_labels = config['sport_clf']['labels']
+        # Directorios
+        self._root = config['root']
+        self._tree_datasets = config['tree_datasets']
+        self.tree_clf = config['tree_clf']
+        self.tree_pl_detect = config['tree_pl_detect']
+        self.tree_mapping = config['tree_mapping']
+        self.tree_utils = config['tree_utils']
+        self.tree_outputs = config['tree_outputs']
 
-        # Player Tracking
-        self.pl_track_path = config['player_tracking']['model_path']
-        self.pl_track_model = config['player_tracking']['model']
+    @property
+    def video_name(self):
+        return self._video_name
+
+    @property
+    def root(self):
+        return self._root
+
+    @property
+    def tree_datasets(self):
+        return self._tree_datasets
+
+    ######################################################################
+    # METODOS PARA OBTENER NOMBRES COMPUESTOS
+    ######################################################################
 
     # Directorio donde estan ubicados los datasets
-    def get_path_video(self):
-        return self.root + self.video_path
+    def get_path_datasets(self):
+        return self.root + self.tree_datasets
 
     # Directorio donde esta ubicado el modelo de Sports Classifier
     def get_path_clf(self):
-        return self.root + self.clf_path
+        return self.root + self.tree_clf
 
     # Directorio donde esta el modelo de Player Detection
     def get_path_pl_detection(self):
-        return self.root + self.pl_track_path
+        return self.root + self.tree_pl_detect
 
     # Directorio donde esta ubicado el modelo de Court Mapping
     def get_path_mapping(self):

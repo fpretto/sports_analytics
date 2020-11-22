@@ -133,7 +133,7 @@ class PlayerDetection:
 
         cap, _, _, _, _ = self.initVideoCapture(video_path, video_name)
         video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.set(1, random.randint(1, video_frames))
+        cap.set(1, int(video_frames * 0.25))  #random.randint(1, video_frames))
         grabbed, frame = cap.read()
 
         if grabbed:
@@ -184,12 +184,12 @@ class PlayerDetection:
         cap, video_frames, video_fps, video_duration, writer = self.initVideoCapture(video_path, video_name,
                                                                           output_path=output_path,
                                                                           output_video_name=output_video_name)
-        player = MediaPlayer(video_path + video_name)
+        #player = MediaPlayer(video_path + video_name)
 
         writer_court_2d = class_mapping.initVideoWriter(video_name, output_path, output_video_name,
                                                         int(cap.get(cv2.CAP_PROP_FOURCC)), int(cap.get(cv2.CAP_PROP_FPS)))
 
-        frames_list = list(range(1, video_frames, int(video_fps/3)))
+        frames_list = list(range(1, video_frames, 1))
         # loop over frames from the video file stream (207)
         while grabbed:
             frame_n = frames_list[frame_id]
@@ -197,7 +197,7 @@ class PlayerDetection:
             # read the next frame from the file
             cap.set(1, frame_n)
             grabbed, frame = cap.read()
-            audio_frame, val = player.get_frame()
+            #audio_frame, val = player.get_frame()
 
             if (grabbed) and (frame_n != frames_list[-1]):
                 frame = self.resizeFrame(frame, scale_pct=50)
@@ -214,6 +214,7 @@ class PlayerDetection:
 
                 # Write the output frame to disk
                 if output_path != None:
+                    frame = self.resizeFrame(frame, scale_pct=200)
                     writer.write(frame)
                     writer_court_2d.write(frame_court_2d)
 
