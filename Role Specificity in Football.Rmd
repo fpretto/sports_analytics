@@ -1,0 +1,1595 @@
+---
+title: "Role specificity in football"
+subtitle: "A Machine Learning approach"
+author: "Group 2 - Chiara Betti, Luca Poggi, Simone Lorenzetti, Fabricio Pretto"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+  highlight: kate
+  toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+setwd("C:/Users/E0662122/MiM+Analytics/10 - Bocconi Exchange/3- Introduction to Sports Analytics/Final Project/")
+
+## Libraries
+listofpackages <- c("knitr","readxl", "stringr", "dplyr", "tibble", "umap", "BBmisc", "dbscan", "factoextra", "cluster", "caret", "rpart", "rpart.plot", "rmdformats", "DescTools", "zoo", "maditr", "sjmisc", "cowplot", "kableExtra")
+
+for (j in listofpackages){
+  if(sum(installed.packages()[, 1] == j) == 0) {
+    install.packages(j)
+  }  
+  library(j, character.only = T)
+}
+
+set.seed(1984)
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=FALSE, cache=TRUE, prompt=FALSE, tidy=TRUE, comment=NA, message=FALSE, warning=FALSE)
+opts_knit$set(width=75)
+```
+
+```{r Preprocessing, include=FALSE}
+## Load Data
+df_GK <- as.data.frame(read_excel('clean_roles_x2.xlsx', sheet = "GK"))
+df_DEF <- as.data.frame(read_excel('clean_roles_x2.xlsx', sheet = "DEF"))
+df <- as.data.frame(read_excel('clean_roles_x2.xlsx', sheet = "clean_roles"))
+## Initial EDA
+dim(df)
+head(df)
+str(df)
+## Preprocessing
+# Harmonize column names
+# Total DF
+names(df) <- gsub(".", "_", gsub(" ", "_", tolower(names(df)), fixed=TRUE), fixed=TRUE)
+df$team <- as.factor(df$team)
+df$id <- as.factor(df$id)
+df$full_name <- as.factor(df$full_name)
+df$position <- as.factor(df$position)
+df$competition <- as.factor(df$competition)
+df$season <- as.factor(df$season)
+# GK
+names(df_GK) <- gsub(".", "_", gsub(" ", "_", tolower(names(df_GK)), fixed=TRUE), fixed=TRUE)
+df_GK$team <- as.factor(df_GK$team)
+df_GK$id <- as.factor(df_GK$id)
+df_GK$full_name <- as.factor(df_GK$full_name)
+df_GK$position <- as.factor(df_GK$position)
+df_GK$competition <- as.factor(df_GK$competition)
+df_GK$season <- as.factor(df_GK$season)
+# Defender
+names(df_DEF) <- gsub(".", "_", gsub(" ", "_", tolower(names(df_DEF)), fixed=TRUE), fixed=TRUE)
+df_DEF$team <- as.factor(df_DEF$team)
+df_DEF$id <- as.factor(df_DEF$id)
+df_DEF$full_name <- as.factor(df_DEF$full_name)
+df_DEF$position <- as.factor(df_DEF$position)
+df_DEF$competition <- as.factor(df_DEF$competition)
+df_DEF$season <- as.factor(df_DEF$season)
+# Create index
+rownames(df) <- df$id
+rownames(df_GK) <- df_GK$id
+rownames(df_DEF) <- df_DEF$id
+# Missing P90 stats
+df$aerial_duels_won_p90 <- (df$aerial_duels_won / df$time_played) * 90
+df$headed_goals_p90 <- (df$headed_goals / df$time_played) * 90
+df$shots_for_p90 <- (df$shots_for / df$time_played) * 90
+df[,"shots_on_target_(_inc_goals_)_p90"] <- (df[,"shots_on_target_(_inc_goals_)"] / df$time_played) * 90
+df[,"goals_%"] <- df$goals_p90 / df$shots_for_p90  * 100
+df[,"goals_on_target_%"] <- df$goals_p90 / df[,"shots_on_target_(_inc_goals_)_p90"] * 100
+df[is.na(df)] <- 0
+
+# Select features to use
+catVars <- c("id", "competition", "season", "team", "position", "soccrole", "full_name")
+
+absVars <- c("height", "weight", "bmi", "goals_p90", "shots_for_p90", "shots_on_target_(_inc_goals_)_p90", "assists_(intentional)_p90", "chance_created_p90", "through_balls_p90", "successful_crosses_p90", "successful_dribbles_p90", "interceptions_p90", "total_successful_passes_(_excl_crosses_&_corners_)_p90", "tackles_won_p90", "total_touches_in_opposition_box_p90", "aerial_duels_won_p90",  "blocks_p90", "clearances_p90", "recoveries_p90", "saves_made_p90", "successful_long_passes_p90","total_losses_of_possession_p90", "duels_won_p90", "successful_passes_own_half___67", "successful_passes_opposition_half___68")
+
+relVars <- c("goals_%", "goals_on_target_%", "headed_goals_p90", "cross_accuracy_%", "dribble_success_%", "pass_accuracy_(%)", "pass_accuracy_own_half_(%)", "pass_accuracy_opp_half_(%)", "tackle_success_%", "touches_in_opp_box_%", "aerial_duels_won_%", "save_ratio_(%)", "long_pass_accuracy_(%)", "duel_success_ratio")
+# GK
+GKabsVars <- c("height", "weight", "bmi", "goals_p90", "assists_(intentional)_p90", 
+               "through_balls_p90", "successful_crosses_p90", "interceptions_p90",    "total_successful_passes_(_excl_crosses_&_corners_)_p90", "blocks_p90", "clearances_p90", "recoveries_p90", "successful_long_passes_p90", "duels_won_p90", "successful_passes_own_half_p90", "successful_passes_opposition_half_p90")
+
+GKrelVars <- c("pass_accuracy_(%)", "pass_accuracy_own_half_(%)", "pass_accuracy_opp_half_(%)", "aerial_duels_won_%", "save_ratio_(%)", "long_pass_accuracy_(%)", "duel_success_ratio", "saves_made_p90")
+
+# Filtering and Variable selection
+df <- df %>% filter(time_played >= 300 & position %in% c('Defender', 'Midfielder', 'Forward')) %>% dplyr::select(c(catVars, absVars, relVars))
+
+df_GK <- df_GK %>% filter(time_played >= 300) %>% dplyr::select(c(catVars, GKabsVars, GKrelVars))
+
+tableVars <- c("competition", "position", "soccrole")
+df_all <- rbind(df[, tableVars], df_GK[, tableVars])
+```
+
+```{r Clustering, include=FALSE}
+generateClusters <- function(df, catVars, absVars, relVars, minPts=50, eps=0.4, pos='All', league='All', sea='All', knn=FALSE, filter_V1='None', filter_V1_sign='greater_than', filter_V2='None', filter_V2_sign='greater_than'){
+  
+  ## Dataset
+  #print('Data: Filtering & Scaling')
+  df_final <- df %>% dplyr::select(catVars)
+  
+  # Filtering
+  if (pos != 'All') {
+    df <- df %>% filter(position==pos)
+    df_final <- df_final %>% filter(position==pos) 
+  }
+
+  if (league != 'All') {
+    df <- df %>% filter(competition==league)
+    df_final <- df_final %>% filter(competition==league)
+  }
+  
+  if (sea != 'All') {
+    df <- df %>% filter(season==sea)
+    df_final <- df_final %>% filter(season==sea)
+  }
+  
+  df <- df %>% dplyr::select(c(absVars, relVars))
+  
+  # Scaling
+  #df_abs <- apply(df[,c(absVars)], MARGIN = 2, FUN = function(X) (RobScale(X, center = TRUE, scale = FALSE)))
+  df_abs <- apply(df[,c(absVars)], MARGIN = 2, FUN = function(X) (normalize(X, method = "range", range = c(0, 1), on.constant = "quiet")))
+  df_rel <- data.frame(apply(df[,c(relVars)], MARGIN = 2, FUN = function(X) (X / 100)))
+  df_scaled <- data.frame(cbind(df_abs, df_rel))
+  df_scaled[is.na(df_scaled)] <- 0
+
+  ## UMAP Dimensionality Reduction
+  #print('UMAP: Dimensionality Reduction')
+  umap_emb = umap(df_scaled, method="naive", preserve.seed=TRUE, random_state=1984)
+  df_umap <- as.data.frame(umap_emb$layout)
+  
+  if (filter_V1 != 'None') {
+    if (filter_V1_sign == 'greater_than') {
+      rows2filter <- df_umap %>% filter(V1>filter_V1) %>% rownames()
+      df_umap <- df_umap %>% filter(rownames(df_umap) %in% rows2filter)
+      df_final <- df_final %>% filter(rownames(df_final) %in% rows2filter)
+      df <- df %>% filter(rownames(df) %in% rows2filter)
+    } else {
+      rows2filter <- df_umap %>% filter(V1<filter_V1) %>% rownames()
+      df_umap <- df_umap %>% filter(rownames(df_umap) %in% rows2filter)
+      df_final <- df_final %>% filter(rownames(df_final) %in% rows2filter)
+      df <- df %>% filter(rownames(df) %in% rows2filter)
+    }
+      
+  }
+  
+  if (filter_V2 != 'None') {
+    if (filter_V2_sign == 'greater_than') {
+      rows2filter <- df_umap %>% filter(V2>filter_V2) %>% rownames()
+      df_umap <- df_umap %>% filter(rownames(df_umap) %in% rows2filter)
+      df_final <- df_final %>% filter(rownames(df_final) %in% rows2filter)
+      df <- df %>% filter(rownames(df) %in% rows2filter)
+    } else {
+      rows2filter <- df_umap %>% filter(V2<filter_V2) %>% rownames()
+      df_umap <- df_umap %>% filter(rownames(df_umap) %in% rows2filter)
+      df_final <- df_final %>% filter(rownames(df_final) %in% rows2filter)
+      df <- df %>% filter(rownames(df) %in% rows2filter)
+    }
+      
+  }
+  
+  ## DBSCAN Clustering
+  #print('DBSCAN: Clustering')
+  if (knn) {
+    dbcl_knn <- kNNdistplot(df_umap, k=minPts)
+  } else {
+    dbcl_knn <- NA
+  }
+
+  dbcl <- dbscan(df_umap, eps = eps, minPts = minPts)
+  
+  annotations <- cbind(df_umap, cluster = as.factor(dbcl$cluster+1)) %>% group_by(cluster) %>% summarize(V1_avg=mean(V1), V2_avg=mean(V2)) %>% filter(cluster!="1")
+  
+  dbcl_plot <- ggplot(data = df_umap) + 
+    geom_point(mapping = aes(x=V1, y=V2, col=as.factor(dbcl$cluster+1))) +
+    scale_colour_discrete("Cluster") +  theme_bw() + 
+    ggtitle('UMAP + DBSCAN Clustering (by Cluster)') + 
+    theme(plot.title = element_text(size = 14)) + 
+    annotate("text", label=annotations$cluster, x=annotations$V1_avg, y=annotations$V2_avg, size=4,       colour="black")
+
+  if (pos=='All'){
+  cl_plot_pos <- ggplot(data = df_umap) + 
+    geom_point(mapping = aes(x=V1, y=V2, col=as.factor(df_final$position))) +
+    scale_colour_discrete("Position") + theme_bw() + 
+    ggtitle('UMAP + DBSCAN Clustering (by Position)') + 
+    theme(plot.title = element_text(size = 14))
+  } else {
+    cl_plot_pos <- NA
+  }
+  
+  if (pos!='Goalkeeper'){
+  cl_plot_subrole <- ggplot(data = df_umap) + 
+    geom_point(mapping = aes(x=V1, y=V2, col=as.factor(df_final$soccrole))) +
+    scale_colour_discrete("Sub Role") + theme_bw() + 
+    ggtitle('UMAP + DBSCAN Clustering (by Subrole)') + 
+    theme(plot.title = element_text(size = 14))
+  } else {
+    cl_plot_subrole <- NA
+  }
+
+  # Final Dataset
+  df_final <- cbind(df_final, cluster = as.factor(dbcl$cluster+1))
+  
+  return(list(df, df_final, df_umap, dbcl_knn, dbcl_plot, cl_plot_pos, cl_plot_subrole))
+}
+```
+
+```{r ClusterDistribution, include=FALSE}
+evaluateClusterDistribution <- function(df_clusters, var="Position"){
+  
+  ## Players' distribution by Position
+  if (var == "Position"){
+    # Create results dataframe
+    df_results <- df_clusters %>% group_by(cluster, position) %>% summarize(full_name=n()) %>% dcast(cluster ~ position, value.var = 'full_name') %>% replace(is.na(.), 0) %>% row_sums(select(., -c("cluster")), n=1, var='Total', append = TRUE)
+    # Rearrange dataframe for plotting
+    df_plot <- df_results %>% select(-Total) %>% melt(id.vars = "cluster",  measure.vars = colnames(select(., -c("cluster"))), variable.name = "Position", value.name = "Composition") 
+    # Plot
+    ggplot(df_plot, aes(fill=Position, x=cluster, y=Composition)) + 
+        geom_bar(position="fill", stat="identity") + 
+        theme_bw() + xlab("Cluster") + ylab("Percentage of Players") +
+        ggtitle('Distribution of Positions by Cluster') + 
+        theme(plot.title = element_text(size = 14)) + 
+        geom_rect(aes(NULL,NULL,xmin=0.55,xmax=max(as.numeric(df_clusters$cluster))+0.45), ymin=1.015,ymax=1.085, color="black", size=0.5, fill='grey', alpha=0.05) +
+        annotate("text", label=df_results$Total, x=df_results$cluster, y=1.05, size=4, colour="black")
+  } else {
+  ## Players' distribution by Subrole
+  # Create results dataframe
+  df_results <- df_clusters %>% group_by(cluster, soccrole) %>% summarize(full_name=n()) %>% dcast(cluster ~ soccrole, value.var = 'full_name') %>% replace(is.na(.), 0) %>% row_sums(select(., -c("cluster")), n=1, var='Total', append = TRUE)
+  # Rearrange dataframe for plotting
+  df_plot <- df_results %>% select(-Total) %>% melt(id.vars = "cluster",  measure.vars = colnames(select(., -c("cluster"))), variable.name = "Subrole", value.name = "Composition")
+  # Plot
+  ggplot(df_plot, aes(fill=Subrole, x=cluster, y=Composition)) + 
+      geom_bar(position="fill", stat="identity") + 
+      theme_bw() + xlab("Cluster") + ylab("Percentage of Players") +
+      ggtitle('Distribution of Subroles by Cluster') + 
+      theme(plot.title = element_text(size = 14)) + 
+      geom_rect(aes(NULL,NULL,xmin=0.55,xmax=max(as.numeric(df_clusters$cluster))+0.45), ymin=1.015,ymax=1.085, color="black", size=0.5, fill='grey', alpha=0.05) +
+      annotate("text", label=df_results$Total, x=df_results$cluster, y=1.05, size=4, colour="black")
+  }
+}
+```
+
+```{r ClusterEvaluation, incude=FALSE}
+evaluateClusters <- function(df_umap, df_final){
+  if (length(unique(df_final$cluster)) > 1){
+    ## Preprocessing
+    df_sil <- cbind(df_umap, as.numeric(df_final$cluster))
+    colnames(df_sil) <- c('V1', 'V2', 'Cluster')
+    df_sil_filtered <- df_sil %>% filter(Cluster>1) # Filter the outliers
+    
+    ## Silhouette Analysis
+    sil.hdbscan <- silhouette(df_sil_filtered$Cluster, dist(select(df_sil_filtered,V1,V2)))
+    sil_plot <- invisible(fviz_silhouette(sil.hdbscan, palette = "jco", ggtheme = theme_bw()))
+    
+    return(sil_plot)
+    }
+}
+```
+
+```{r ClusterInterpretation, incude=FALSE}
+
+interpretClusters <- function(df, df_final){
+  if (length(unique(df_final$cluster)) > 1){
+    
+    ## Decision Tree for Interpretability
+    #print('Decision Tree: Interpreting Clusters')
+    df_tree <- cbind(df, cluster = df_final$cluster)
+    
+    # Model Training
+    train_index <- createDataPartition(df_tree$cluster, p = 0.8, list = FALSE)
+    train_data <- df_tree[train_index,]
+    test_data <- df_tree[-train_index,]
+    tree <- rpart(cluster ~ ., data = train_data, control = rpart.control(minsplit = 30, maxdepth = 5))
+    tr_plot <- rpart.plot(tree, main="Cluster Interpretation", cex.main=1)
+    
+    # Model Evaluation
+    tree_predictions <- predict(tree, newdata = test_data, type = "class")
+    tr_acc <- gsub(" ", "", paste(as.character(round(mean(test_data$cluster == tree_predictions)*100,2)), "%"))
+  
+    # Feature Importance
+    var_imp <- data.frame(importance = tree$variable.importance) %>% 
+    rownames_to_column() %>% rename("Feature" = rowname) %>% arrange(importance) %>%
+    mutate(Feature = forcats::fct_inorder(Feature))
+    
+    ft_imp <- ggplot(var_imp) +
+    geom_col(aes(x = Feature, y = importance), col = "black", show.legend = F) +
+    coord_flip() + scale_fill_grey(start=0.2, end=0.8) + theme_bw() + 
+    ggtitle('Decision Tree: Feature Importance') + 
+    theme(plot.title = element_text(size = 14))
+  
+  return(list(tr_plot, tr_acc, ft_imp))
+  }
+}
+```
+
+# Introduction
+
+## Data
+
+### Dimensions
+
+  - **Positions:** Goalkeeper, Defender, Midfielder, Forward
+  - **Subroles:** GK (Goalkeeper), CB (Center Back), FB (Full Back), CM (Center Middle), DMC (Defensive Middle Center), CAM (Center Attacking Middle), WAM (Wing Attacking Middle), FW (Forward)
+  - **Leagues:** Serie A, Premier League, La Liga, Bundesliga, Ligue 1, Primeira Liga
+  - **Seasons:** 2017, 2018, 2019, 2020
+
+### Players by Position
+
+```{r Positions}
+df_all %>% group_by(Position=position) %>% summarize(Players=n()) %>% kable()
+```
+
+### Players by League
+
+```{r Leagues, echo=FALSE}
+df_all %>% group_by(League=competition) %>% summarize(Players=n()) %>% kable()
+```
+
+### Players by Position and League
+
+```{r PositionsLeagues, echo=FALSE}
+df_all %>% group_by(League=competition, Position=position) %>% summarize(Players=n()) %>% kable()
+```
+
+### Features
+
+**Goalkeepers**
+
+```{r Features_GK, echo=FALSE}
+df_GK %>% select(-c(id, competition, season, team, position, soccrole, full_name)) %>% summary(df_GK) %>% kable()
+```
+
+**Defenders, Midfielders and Forwards**
+
+```{r Features_All, echo=FALSE}
+df %>% select(-c(id, competition, season, team, position, soccrole, full_name)) %>% summary(df) %>% kable()
+```
+
+## Methodology
+
+### Algorithms
+
+  - **Dimensionality Reduction:** UMAP - *Non-linear dimensionality reduction method, very effective for visualizing clusters or groups of data points and their relative proximities.*
+
+  - **Clustering:** DBSCAN - *Density-based clustering technique that separates dense regions in space from regions of lower density, expanding them recursively to find dense arbitrarily shaped clusters.*
+
+### UMAP 
+
+The intuition behind UMAP is that it constructs a high dimensional graph representation of the data first, and then optimizes a low-dimensional graph to be as structurally similar as possible.
+
+It relies on the manifold hypothesis or assumption, which holds that most real-world high-dimensional datasets lie close to a much lower-dimensional manifold.
+
+In this way, it preserves the data's global structure, meaning that both within cluster and between cluster distances are guaranteed. This represents an advantage against other non-linear techniques like t-SNE (it is also much faster to achieve convergence).
+
+### DBSCAN
+
+The main idea behind DBSCAN is that clusters are dense regions in space separated by regions of lower density. The algorithm finds these dense areas and expands them recursively to find dense arbitrarily shaped clusters.
+
+There are three key parameters to consider: 
+
+- **minPts:** minimum number of data points to define a cluster.
+- **eps:** distance that specifies the neighbourhoods. Two points are neighbours if the distance between them is less than or equal to eps.
+- **distance metric:** by default, it uses Euclidean distance, although other methods can also be used.
+
+We will default the **distance metric** to the Euclidean, and we will tune **minPts** and **eps** to find the most representative clusters possible.
+
+In order to determine the optimal value of **eps**, we will set a value for **minPts** and make use of the average distances of every point to its k nearest neighbors, where k will be **minPts**. These k distances are then plotted in ascending order, to get an elbow plot. The distance where a sharp change (elbow) in the curve can be seen is the theoretical optimal value for **eps**.
+
+### Analysis
+
+The analysis of the roles in a football pitch will be divided by league and position. Firstly, we will analyze the leagues altogether to try to find general patterns and clusters. Secondly, we will perform the same analysis for each separate league and evaluate if there are significant differences among them.
+
+The analysis conducted for each league and position will contain 5 sections:
+
+- **Dimensionality Reduction + Clustering:** UMAP + DBSCAN application to the data in order to extract meaningful clusters.
+
+- **Cluster Distribution:** analysis of how positions and subroles are distributed among each identified cluster.
+
+- **Cluster Evaluation:** technical evaluation of within and between clusters' performace using silhouette score. This value ranges from −1 to +1, where a high value indicates that the players are well matched to their own cluster and poorly matched to neighboring clusters.
+
+- **Cluster Interpretation:** supervised learning using the clusters' labels as the target variable to interpret which players' characteristics describe each group and how do they interact with each other.
+
+- **Cluster Composition:** tables of players by cluster to understand them and validate if they make sense.
+
+We will exclude the goalkeepers from the analysis, since the nature of the role is completely different from the rest and the identification of subroles is not so relevant.
+
+# All Leagues
+
+## All Positions (excl. GK)
+
+Since the aim is to analyze the within roles divisions, clustering performed on all the players may not be very significant from a football point of view. Indeed, given the high variability in such a large dataset, it is unlikely that our algorithm will provide a more significant categorization than the one based on subroles assigned according to the specific position in the pitch. However, a quick overview of the analysis will be helpful for introducing the methodology and it will cue us some hints to keep in mind for the rest of the analysis.
+
+### Clustering
+
+```{r Global_Position_All_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=12}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=115, eps=0.45, pos='All', league='All', sea='All')
+
+plot_grid(listCluster[[5]], listCluster[[6]], listCluster[[7]], align="v", nrow=3, rel_heights=c(1/3, 1/3, 1/3))
+```
+
+- **Cluster 1**: outliers, intended as unique players whose characteristics distinguish them from the rest of the dataset (both in good and bad sense!). Some champions included here are Lionel Messi, Cristiano Ronaldo, Kevin De Bruyne and Aymeric Laporte.
+
+- **Cluster 2** mainly groups center-backs with high clearances and recoveries but no offensive participation.
+
+- **Cluster 3** is very heterogeneous and groups those players with a high offensive propensity, independent on the role. Indeed, only center-backs are excluded from this cluster.
+
+- **Cluster 4** includes center-backs together with some full-back and defensive midfielder. They have good passing skills but are still not involved in the build-up phase.
+
+- **Cluster 5** is the full-backs' cluster. As we will see in almost every league, these players are the ones with the most similar characteristics between each other.
+
+- **Cluster 6** includes almost all the center forwards.
+
+- **Cluster 7** is formed by physical central defenders with a good scoring record, like Harry Maguire.
+
+- **Cluster 8** groups all those central defensive players who mainly focus on men mark, but still being very effective when they have to pass the ball or even dribble the opponent (examples are Presnel Kimpembe and Ruben Dias).
+
+- **Cluster 9** includes highly heterogeneous central midfielers.
+
+- **Cluster 10** is a sort of residual group. The only common characteristic of these players is that they score above the average for their roles.
+
+### Cluster Distribution
+
+We will examine the clusters in greater detail by looking at their composition by position and subrole:
+
+```{r Global_Position_All_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Position")
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+
+### Cluster Evaluation
+
+```{r Global_Position_All_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r Global_Position_All_Interpretation, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Global_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Defender
+
+
+
+### Clustering
+
+```{r Global_Position_Defender_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=75, eps=0.75, pos='Defender', league='All', sea='All')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1** both full-backs and center-backs present here display very peculiar attributes, and for this reason their managers have often designed for them a custom role. It is the case of Kyle Walker, Oleksandr Zinchenko, Thomas Meunier and Rafael Toloi.
+
+- **Cluster 2** is mainly composed of center backs. These players do not stand put for their technical skills, but they are quite effective in the number of clearances and duels won. Moreover, they score more than the average for their role. Examples are Chris Smalling, Diego Godin and Pepe are relevant players here.
+
+- **Cluster 3** groups amny top level center backs. Not only they are very successful in leading their teams' defense, but they are also a constant threat in the opponents'box, being able to score also five goals or more per season. Moreover, their passing abilities are fundamental for the build-up phase. Some examples: Sergio Ramos, Mats Hummels, Gianluca Mancini and Thiago Silva.
+
+- **Cluster 4** is quite small and not of particular interest. Players here stand out in our visualization tool for having scored some goals with very little offensive participation.
+
+- **Cluster 5** is of particular interest. It groups 90% of the database full-backs together with some few centre-bcks who can also play on the side. The indication given from this cluster is clear: modern full-backs and wing-backs are required to have high offensive skills. In particular, they are by far the defenders with highest chances created and percentage of successful dribbles, while they need a very high number of shots before scoring a goal.Trent Alexander-Arnold, Alex Sandro, Theo Hernandez and Sime Vrsaljiko are clear examples of this evolutionary path. 
+
+- **Cluster 6** mainly includes center backs, even if with a few full-backs. Players here are solid defenders that rarely give any contribution to the build-up or the attacking phase. Andreas Christensen is present here.
+
+- **Cluster 7** is made of 50% CBs with high offensive contribution and 50% FBs with good crossing skills. None of these players is a particularly able stopper.
+
+- **Cluster 8** groups those players with important physical qualities. They are both solid in aerial duels and fast in running after their opponent to stop the attack. Their offensive contribution, though, is negligible, as well as the one in the build-up phase, since they limit themselves to basic shrt passes. Andrea Barzagli and Presnel Kimpembe are good representatives of this cluster
+
+- **Cluster 9** groups players whose only common feature is not being really good.
+
+### Cluster Distribution
+
+```{r Global_Position_Defender_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r Global_Position_Defender_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r Global_Position_Defender_Interpretation, warning=FALSE, messages=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df=listCluster[[1]], df_final=listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Global_DEF_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Midfielder
+
+Due to their humongous heterogeneity, midfielders are the most difficult players to deal with using such a general algorithm as our one is. For this reason, the division between clusters here has to be intended as less neat than in the other cases. Nonetheless, very interesting results will be shown in this section. The isolated point in the graph represents Raoul Garcia, whose combination of high goals scored, high touches in the box and consistent defensive contribution were recognised by our algorithm as a sign of uniqueness.
+
+### Clustering
+
+```{r Global_Position_Midfielder_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=50, eps=0.45, pos='Midfielder', league='All', sea='All', filter_V1=10, filter_V1_sign='lower_than', filter_V2='None', filter_V2_sign='greater_than')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1** is the usual outliers' group. In this particular case, due to the above cited large heterogeneity, it is also a large group. Some of the best players here are David Silva, Bernardo Silva, Marco Verratti, Luka Modric and Bruno Fernandes. Common features are high dribbling success and a large amount of chances created.
+
+- **Cluster 2** only includes offensive players (be they CAMs, WAMs or CMs). Though their defensive support is very low, they compensate with a high participation in the build-up phase and, even if in minor part, in the attacking one. They are mainly active in the opponents' half and are always looking for a well positioned teammate to pass the ball to. Since they often try difficult passes, their precision is not so elevate, but they are still able to create many chances. Some representatives are Lorenzo Pellegrini, Hakan Chalhanoglu, Phil Foden and Christian Pulisic
+
+- **Cluster 3** groups central midfielders with high propensity and effectivenes in the defense phase. These players are very concrete, since they attempt simple passes or dribbles without missing any of them (or, at leat, a very small number). They lead the stats in interceptions and recoveries, and some of them are even able to contribute to the build-up. Danilo Pereira, Gabi and Lucas Leiva belong to this cluster.
+
+- **Cluster 4** refers to those players who are successful at passing in both halves and have a great physical ability which allows them to recover many balls and win most of the aerial duels engaged. It includes players like Leon Goretzka, Ruben Neves and Mario Pasalic.
+
+- **Cluster 5** includes mostly playmakers. These players are quite static, avoid to engage many duels and always try to receive the ball in order to direct the build-up of their team. They are hence very precise in their passes, and even if they rarely enter the opponents' box, they find the way for scoring with stunning free-kicks and penalties. Miralem Pjanic, Arthur, Toni Kroos, Frenkie De Jong, Jorginho Frello and almost any other top team's playmaker are here.
+
+- **Cluster 6** is not really interesting. It includes those defensive players who are not good enough to enter in cluster 3. AC Milan fans will automatically think about Riccardo Montolivo, who is here indeed.
+
+- **Cluster 7** requires a similar argument as the one made for cluster 6. It is the weak counterpart of cluster 4.
+
+- **Cluster 8** includes some good players like Lucas Torreira, Julian Weigl and Donny van de Beek, but it looks quite random. As we can see from the tree, they have a mix of good passing skills, good goal contribution and with high precision, but a huge variability in dribbling and defensive stats.
+
+### Cluster Distribution
+
+```{r Global_Position_Midfielder_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r Global_Position_Midfielder_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r Global_Position_Midfielder_Interpretation, warning=FALSE, messages=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Global_MID_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Forward
+
+The division within forwards is almost identical to the one between center forwards and attacking wingers. The interesting feature in this case will be looking at those players who ended up being in the "wrong" cluster and understand the relevant causes, if any. Moreover, a finer partition will be found and explained in detail in the within league sections.
+
+### Clustering
+
+```{r Global_Position_Forward_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=55, eps=0.5, pos='Forward', league='All', sea='All')#, filter_V1=10, filter_V1_sign='lower_than', filter_V2='None', filter_V2_sign='greater_than')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1** is able to include almost all the world class forwards. Some common features are very high passing skills, high touches in the opponents' box and, of course, a huge number of goals scored. Robert Lewandowski, Cristiano Ronaldo, Kylian Mbappè, Sergio Aguero, Marcus Rashford and Mohammed Salah are included here. The reason why Messi is missing here is essentially due to the fact that he is too short with respect to these players, so the algorithm considers him as a sort of outlier in the outliers.
+
+- **Cluster 2** is the wingers' cluster. Despite being a large single group, it is clear from the tree below that it is made of two different types of player. On the one hand we have the ones that actively participate to the defense phase with high recoveries and an above average number of successful crosses (Kingsley Coman and Federico Chiesa are some examples). On the other side, there are those who do not defend much - this is particularly due to their lower BMI with respect to their colleagues - but are highly effective in short passes allover the field (like Angel Di Maria and Lorenzo Insigne). Neymar Jr., Raheem Sterling and Sadio Manè are also included in this cluster. Dribbling skills within the cluster, however, are not so relevant for a discrimination. Some center forwards are also unexpectedly included here, and it is basically because they combine the strikers' shooting and scoring production with very high dribbling and vision skills. We are talking about champions like Lionel Messi, Roberto Firmino, Dries Mertens.
+
+- **Cluster 3** is cluster 2's counterpart. Here we can find almost all the center forwards in the database. A sub-partition can be found her too. We have both the evergreen complete forward, very tall but still technically gifted to be proper offensive reference point (like Edin Dzeko and Edinson Cavani) and fast players, extremely technical, who score lots of goals thanks to their dribbling skills and killer instinct (Luis Suarez, Jamie Vardy and Pierre-Emerick Aubameyang among the others). Wingers included in this cluster do not seem to have any common feature.
+
+- **Cluster 4** includes a very small number of players. Their peculiarity is essentially those of combining the dribbling skills of a winger, the vision of a trequartista and the goal scoring of a striker. Karim Benzema, Gareth Bale, Gabriel Jesus and Gonzalo Higuain perfectly represent this idea.
+
+### Cluster Distribution
+
+```{r Global_Position_Forward_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r Global_Position_Forward_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r Global_Position_Forward_Interpretation, warning=FALSE, messages=FALSE}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Global_FW_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+# Serie A
+
+## All Positions (excl. GK)
+
+### Clustering
+
+```{r SerieA_Position_All_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=12}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=35, eps=0.52, pos='All', league='Serie A', sea='All')
+
+plot_grid(listCluster[[5]], listCluster[[6]], listCluster[[7]], align = "v", nrow = 3, rel_heights=c(1/3, 1/3, 1/3))
+```
+
+- **Cluster 1**: Seems to be totally random.
+
+- **Cluster 2**: it is mainly composed by full backs and defensive midfielders. It is interesting to see that the players which will turn out to be outliers in the defender within cluster analysis (Danilo and Pisacane) fall in that cluster confirming our thesis that they play more as midfilder even if listed as defenders.
+
+- **Cluster 3**: a cluster composed entirely from central backs. (Chiellini, Romagnoli)
+
+- **Cluster 4/8**: low performing central backs together with defensive midfielders of low-ranked teams. 
+
+- **Cluster 5**: this cluster is composed mainly by heavy center forwards. This is confirmed by the high bodyweight and the ability to win aerials duels. It is a very well defined cluster where there are players such as Ibrahimovic, Perica and Ronaldo. 
+
+- **Cluster 6**: this cluster differs from cluster 5 for bodyweight and aerial duels under threshold. Here we find players having good ability to score but play more as second striker such as Mertens, Dybala and ilicic. 
+
+- **Cluster 7/9**: the clusters are mainly composed by defender with the vice of scoring such as Izzo, Fazio and Bonucci. 
+
+```{r SerieA_Position_All_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Position")
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r SerieA_Position_All_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r SerieA_Position_All_Interpretation, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r SerieA_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+
+## Defender
+
+The main determinant and discriminant of this cluster subdivision is the number of cross completed: concretely this is the most effective way to distinguish between full-backs and central-backs. 
+
+It emerged that Serie A has a very eterogeneous and non standardized interpretation of the role with respect of other leagues. 
+
+### Clustering
+
+```{r SerieA_Position_Defender_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=30, eps=0.7, pos='Defender', league='Serie A', sea='All')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1**: we will define outliers more as unique players rather than outstanding: this come from from how dbscan construct the clusters and identify the outliers. This is coherent with the result we have: Danilo, Pisacane and Toloi are the most representative defenders of this clusters. All of them tend to play inside the football pitch and participate to the offensive manoveur more as midfilder than defenders. For this reason it is completely logical that they are identified as outliers.
+
+- **Cluster 2**: the cluster is composed by mid-level central backs. The player archetype identified is a reliable defender not particularly technically gifted, unwilling to score. He usually play for a classical half-standing team. (Glik, Alex Ferrari, Hoedt)
+
+- **Cluster 3**: this cluster is composed mainly by higher level central backs with a propensity to score goals and be active also in goal chance creation. Bonucci, Bastoni and Acerbi are the main example: three very partecipative players in the construction phase. Two of them play as the third defender in a 3 defense which brings them to be always at the center oh the game, while Bonucci for personal characteristic tends to be the second game creator if the playmaker is tightly marked. We also have Mancini and Fazio, which are two central backs with the goal vice on set pieces. 
+
+- **Cluster 4 and 6**: these two clusters are de facto very similar, they collect all those very low-level central defenders with under mean stats for almost every aspect of the game. They usually play for teams which fight to stay in Serie A. Examples: Djidji, Bani, De Maio. 
+
+- **Cluster 5**: This is the full-back cluster, as i said before the main determinant is the number of cross completed. Examples: Theo Hernandez, Hakimi, Alex Sandro, Ghoulam. 
+
+### Cluster Distribution
+
+```{r SerieA_Position_Defender_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r SerieA_Position_Defender_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r SerieA_Position_Defender_Interpretation, warning=FALSE, messages=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df=listCluster[[1]], df_final=listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r SerieA_DEF_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Midfielder
+
+The main determinant of this cluster is the "succesful passes in opposition box": the indication this variable gives is mainly positional, dividing defensive from offensive midfielders. 
+
+### Clustering
+
+```{r SerieA_Position_Midfielder_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=25, eps=0.6, pos='Midfielder', league='Serie A', sea='All', filter_V1=10, filter_V1_sign='lower_than', filter_V2='None', filter_V2_sign='greater_than')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1**: it is composed by players which are determinant for their teams in terms of shots, key passes and chance created. They can be cathegorized as exceptional midfielders. Examples: Hamsik, Zielinski and Milinkovic Savic. When on the field, good part of the team's offensive creation depends on these players. 
+
+- **Cluster 2**: this cluster is composed by all-field interdiction midfielders. They do not participate in low construction (low successful passes in own half) and do not even create gol chance. They are also not used to shot on target and be present in the opponents box. Another interesting aspect is the bodyweight lower than 84kg, indicating that probably they are very aerobic players. Examples, Matuidi, Rog, Tonali and Gagliardini. All of them play as mezzala in 3 midfield, and their playstile is consistent with the above description. 
+
+- **Cluster 3**: composed by players with a high-level of completed passes in its own half. They are characterized by low level of dribbling made, low amount of gol scored and low amount of gol chance created. This cluster collects those players that can be defined as low playmakers which performs easy passes and give geometry to the manoveur. Example, Nzonzi, Locatelli, Bentancur and Lucas Leiva. All of them play as defensive midfilder in front of the defense. 
+
+- **Cluster 4**: this cluster is composed by players that occupate the opponents half (low level of completed pass in own half), with low inclination to lose the ball (indicating good level of technique) and with a high propensity to create gol chance. Example, Saponara, Chalanoglu and Luis Alberto. These are the classical number 10 or offensive playmaker.
+
+- **Cluster 5**: this last cluster is mainly determined by passing skills. All of these players have high level of succeeded passes both in the opposite and in the own half. They also have gol creation skills. These are very technical box-to-box mezzala. Example: Baselli, Borja Valero, Arthur.
+
+### Cluster Distribution
+
+```{r SerieA_Position_Midfielder_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r SerieA_Position_Midfielder_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r SerieA_Position_Midfielder_Interpretation, warning=FALSE, messages=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r SerieA_MID_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Forward
+
+The main determinant for this role is the recovery. It does make sense since it makes possible to distinguish between area attackers and wingers, manoveur forwards. 
+
+### Clustering
+
+```{r SerieA_Position_Forward_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=20, eps=0.58, pos='Forward', league='Serie A', sea='All')#, filter_V1=10, filter_V1_sign='lower_than', filter_V2='None', filter_V2_sign='greater_than')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1**: the cluster is mainly composed by froward-playmakers: they are listed as forwards, but de facto they play all over the fields and create chance for the teammates. They are determinant for their teams in all aspects, not only the scoring one. The main examples of this are Cuadrado, Papu Gomez, Gervinho and Insigne.
+
+- **Cluster 2**: the cluster is mainly determined by forward that do not perform recoveries, and have low level of succesful passes in the opponents half. This, translated in football terms, could frame the so called poacher: a striker that lives in the opponents box and does not participate too much to the offensive manoveur. Examples: Lautaro Martinez, Milik, Ronaldo, Immobile. 
+
+- **Cluster 3**: forward with lot of recoveries, that performs lot of passes in the opposition half, but also have a good propensity to score. These players are mainly wingers that participate also to the defensive phase and tend to be a continous point of reference during the development of the offense. Some examples are the classical box-to-box wingers such as Chiesa, Berardi and Candreva and also box-to-box attacking midfielders such as ilicic and Verdi. 
+
+- **Cluster 4**: this cluster is almost identical to cluster 3, with the only difference that it is compoed by players with lower level of succesful passes, resulting in lower-level players: this variable is determinant for the interpretation of the role, and it is evident by the names composing this cluster. Example: Fares, Bonaventura, Molina.
+
+### Cluster Distribution
+
+```{r SerieA_Position_Forward_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r SerieA_Position_Forward_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r SerieA_Position_Forward_Interpretation, warning=FALSE, messages=FALSE}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r SerieA_FW_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+# La Liga
+
+## All Positions (excl. GK)
+
+Despite being unanimously considered the most technically skilled among the top European leagues, La Liga's teams are very heterogeneous in their style of playing as well as in their players'characteristics. This is witnessed by the fact that both the team with the highest short passes completed in Europe (FC Barcelona) and the one with the least number of it (Cadiz) play in this league. It will be interesting to see how high technical skills and great heterogeneity will be represented by our algorithm.
+
+### Clustering
+
+```{r LaLiga_Position_All_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=12}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=38, eps=0.55, pos='All', league='La Liga', sea='All')
+
+plot_grid(listCluster[[5]], listCluster[[6]], listCluster[[7]], align = "v", nrow = 3, rel_heights=c(1/3, 1/3, 1/3))
+```
+
+- **Cluster 1**: in the outliers' cluster the Real Madrid and Barcelona's midfielders stand out. Together with them, we see also Steven N'Zonzi, Rodri and Roberto Soriano.
+
+- **Cluster 2** is made of low-skilled center-backs, some few defensive midfielders and full-backs. They are effective defenders, while the offensive contribution is almost none. Among these players there are Sulley Muntari, Jeison Murillo, Daniele Bonera and Facundo Roncaglia.
+
+- **Cluster 3** includes wingers and offensive midfielders. These players are very creative and they are fundamental mainly for their teams' build-up phases. They are at a top level for chances created, while they are not very involved in the defensive phase. Here are included some top players like Lionel Messi, Luka Modric, Angel Correa and Isco.
+
+- **Cluster 4** includes almost all the forwards, together with some offensive winger and trequartistas. Karim Benzema, Luis Suarez, Antonie Griezmann and Mikel Oyarzabal are important members of this cluster.
+
+- **Cluster 5** is made of highly technical center-backs, plus some full-backs and a very small number of defensive midfielders. They distinguish themselves for the high number of clearances, interceptions and tackles won. The most outstanding players are Diego Godin, Sergio Ramos and	Pau Torres.
+
+- **Cluster 6** mainly includes central midfielders with mostly defensive characteristics and some full-backs. They attempts few dribbles and few vertical passes, but they rarely miss the move. Francis Coquelin, Lucas Digne and Lucas Torreira are three examples of such players.
+
+- **Cluster 7** is very heterogeneous. It includes lateral midfielders, full-backs and central midfielders. They are good defenders but also effective in their offensive contribution. Achraf Hakimi, Marcos LLorente, Vitolo and Yuri Berchiche are present here.
+
+- **Cluster 8** is a specification of cluster 7, only including wingers and full-backs. Players here are still good defenders, but they are not so offensively effective (even if someone gives a high contribution in the number of crosses and shots). Some examples are Nacho Fernandez, Kieran Trippier and Aleix Vidal.
+
+```{r LaLiga_Position_All_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Position")
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r LaLiga_Position_All_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r LaLiga_Position_All_Interpretation, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r LaLiga_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Defender
+
+The algorithm gives us three categories: two for center-backs and one for full-backs. The main discriminants are the number of chances created, number of successful crosses and the clearances. The outliers group is very small and it does not include relevant players.
+
+### Clustering
+
+```{r LaLiga_Position_Defender_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=25, eps=0.6, pos='Defender', league='La Liga', sea='All')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1** is made of those players who were more difficult to assign to the next clusters. No relevant players are included here.
+
+- **Cluster 2** groups low-technical central defenders, in particular those who display very low offensive attempts (in terms of  dribbles and crosses) but that are still able to be dangerous in the opponents' box thanks to their aerial ability Simon Kjaer and Facundo Roncaglia are valid examples.
+
+- **Cluster 3** has a role composition similar to cluster 2, but here the technical level is much higher. They have high clearances and duels won, while the high dribbling success signals the ability of taking risks in the right moments. Some players included here are Sergio Ramos, Pau Torres, Diego Godin and Gerard Pique. 
+
+- **Cluster 4** groups almost all the full-backs. The typical characteristics of such role are high successful dribbles, high crosses attempted and, in case of the most technically gifted, a good chance creation. Nacho Monreal, Marcelo and Jordi Alba are the full-backs par excellence.
+
+### Cluster Distribution
+
+```{r LaLiga_Position_Defender_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r LaLiga_Position_Defender_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r LaLiga_Position_Defender_Interpretation, warning=FALSE, messages=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df=listCluster[[1]], df_final=listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r LaLiga_DEF_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Midfielder
+
+In the recent years a peculiar phenomenon emerged in La Liga clubs: a duality between highly technical but low physical and higly physical but low technical players. At a first sight, our algorithm looks to have performed a much finer clustering. 
+
+### Clustering
+
+```{r LaLiga_Position_Midfielder_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=25, eps=0.7, pos='Midfielder', league='La Liga', sea='All', filter_V1=10, filter_V1_sign='lower_than', filter_V2='None', filter_V2_sign='greater_than')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1**, almost paradoxically, is the cluster where the most old-style players are included. Here we can find very heterogeneous characteristics represented, with the common denominator being just the fact that there are no players that are even similar to the ones present here. Sergio Busquets is the perfect mascotte for the group, as well as Giovani Lo Celso and Raoul Garcia.
+
+- **Cluster 2** seems one of those coarse clusters we were mentioning before: only rude players, those with fewer technical skills and offensive contribution, are present here. They are a few central midfielders with a strong defensive attitude. Sulley Muntari, Mathieu Flamini and Etienne Capoue are the best known ones.
+
+- **Cluster 3** is a big group that generalizes the previous one. Though the players'characteristics are still those of defensive midfielders (high clearances and interceptions, high duels won, low chances created), here we can also find some technically gifted player that is particularly crucial for the build-up phase. Among the 157 players we find: Casemiro, Rodri, Marcos Llorente and Gabi.
+
+- **Cluster 4** is the counterpart of the above cited duality: only highly technical players find room here. Mezzalas with high contribution to the build-up phase are the most represented group, but there is also a vast sample of some "number 10". The main characteristics are many passes with high accuracy in both halves and high chances created. These players generally do not contribute much to the defense phase. Isco, Kroos, Modric, Rakitic, Iniesta are a few examples of this very precious cluster.
+
+- **Cluster 5** still includes technical players, but it focuses on those with the highest offensive production in terms of shots and dribbles. It is not by chance that almost all the league's wingers are here. Relevant examples are Angel Correa, Mikel Oyarzabal and Takefusa Kubo.
+
+- **Cluster 6** is a sort of residual cluster, where players with heterogeneous but non exceptional characteristics are included. The most known ones are Sergi Darder and Brais Mendez.
+
+### Cluster Distribution
+
+```{r LaLiga_Position_Midfielder_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r LaLiga_Position_Midfielder_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r LaLiga_Position_Midfielder_Interpretation, warning=FALSE, messages=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r LaLiga_MID_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Forward
+
+La Liga has always been the homeland for great strikers and attacking wingers. Will our algorithm represent correctly the vast heterogeneity in these players' characteristics?
+
+### Clustering
+
+```{r LaLiga_Position_Forward_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=15, eps=0.55, pos='Forward', league='La Liga', sea='All')#, filter_V1=10, filter_V1_sign='lower_than', filter_V2='None', filter_V2_sign='greater_than')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1** is very heterogeneous, but the players included here are extremely skilled. A few examples are Antoine Griezmann, Ansu Fati, Nolito and Eden Hazard.
+
+- **Cluster 2** includes a large class of wingers. Not really physical but still involved in the defense phase, they have impressive dribbling skills, and they often try the one-vs-one rather than looking for a teammate to pass the ball to. Adnan Januzai, Iker Muniain, Suso and Bryan Gil are relevant examples, while including also Leo Messi would probably be too belittling for him.
+
+- **Cluster 3** almost all the league's center forwards are included here. The common features are an above average height, good dribbling success and high presence in the opponents' box. Karim Benzema, Cristiano Ronaldo, Joao Felix and Diego Costa mainly stand out for their shooting accuracy and the great number of goals scored.
+
+- **Cluster 4** includes 17 players. The main common feature is a high propensity to help the team in defense: what stands out the most are recoveries per game and duels won. Moreover, they display good passing skills on average Ferran Torres and Lucas Ocampos are representative for this niche.
+
+- **Cluster 5** is very similar to the previous one. The main difference seems to be that they are better at defending when well positioned, while the others are often forced to run after the opponents. Interesting examples are Quincy Promes, Carlos Soler and Jesus Navas.
+
+- **Cluster 6** is only composed of 15 players, whose common denominator is not being good players in any attribute.
+
+### Cluster Distribution
+
+```{r LaLiga_Position_Forward_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r LaLiga_Position_Forward_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r LaLiga_Position_Forward_Interpretation, warning=FALSE, messages=FALSE}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r LaLiga_FW_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+# Premier League
+
+## All Positions (excl. GK)
+
+More than in other leagues, the overall clustering brings in very few interesting results. Moreover, the outliers group is completely random.
+
+### Clustering
+
+```{r PremierLeague_Position_All_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=12}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=43, eps=0.57, pos='All', league='Premier League', sea='All', knn=FALSE)
+
+plot_grid(listCluster[[5]], listCluster[[6]], listCluster[[7]], align = "v", nrow = 3, rel_heights=c(1/3, 1/3, 1/3))
+```
+
+- **Cluster 2/7**: the cluster is almost completely made by classical central back, plus some very defensive midfielder which some times play as central back as a backup such as Dier. (Otamendi, Smalling)
+
+- **Cluster 3**: mainly composed by full back and "factotum" midfielders. We have seen that full backs and certain midfielders share the same type of statistics. Example of this are Zinchenko and Marcos Alonso, which participate a lot to the offensive manoveur. Midfielder examples are Lallana and Kovacic. 
+
+- **Cluster 4**: it's like the low-ranked version of cluster 3, plus some good full back such as Wan Bissaka. 
+
+- **Cluster 5**: This cluster is entirely made by players who perform lot of passes in the opposite half and are also used to touch the ball in opposition box. it is made by "number 10" such as Maddison and second strikers such as Mkhitaryan.
+
+- **Cluster 6**: this cluster is built with players that are in the top percentile for touches in opposition boxes, so as expected it is entirely made of center forwards such as Crouch, Llorente and Chicharito Hernandez. 
+
+- **Cluster 8**: this cluster is composed by random offensive players which do not score many goals such as Zaha, Tadic and Townsend. 
+
+### Cluster Distribution
+
+```{r PremierLeague_Position_All_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Position")
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r PremierLeague_Position_All_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r PremierLeague_Position_All_Interpretation, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Premier_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Defender
+
+With respect to other leagues such as Serie A, the defenders are much more homogeneous, resulting in only 3 clusters + 1 of outliers which is almost non relevant. Also in this case the determinant variables are the succesful crosses, which manage to distinguish between central backs and full backs.
+
+### Clustering
+
+```{r PremierLeague_Position_Defender_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=30, eps=0.80, pos='Defender', league='Premier League', sea='All', knn=FALSE)
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 2**: this cluster is made by central backs, that has no dribbling in their skills, and they are not outstanding in the clearences stat. It's the classical central back not particulary technically gifted. Example: Christensen, Lovren, Bailly.
+
+- **Cluster 3**: this cluster like the previous one is entirely composed by central backs. To be in this clusters, defenders must have a dribbling level and amount of clearances over a certain threshold: this means we are seeing players good to play with their feet and that make lot of clearences (both because they are very good and because they play in a team which is subject to many attacks). Example: Van Dijk, Thiago Silva, Mustafi.
+
+- **Cluster 4** : there is not too much tu say on this cluster. All the full back are grouped here through the cross subdivision. Examples: Bellerin, Mendy, Walker, Alexander Arnold.
+
+### Cluster Distribution
+
+```{r PremierLeague_Position_Defender_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r PremierLeague_Position_Defender_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r PremierLeague_Position_Defender_Interpretation, warning=FALSE, messages=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df=listCluster[[1]], df_final=listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Premier_DEF_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Midfielder
+
+In this case the main driver is the number of completed passes in own half. Like for Serie A midfielders, the variable gives mainly a first positional discriminant between clusters, dividing offensive from defensive midfielders. 
+Clustering for Premier League midfielders gives very interesting results: there are lot of cluster which describes precisely different play approach to the game. While defending approach turned out to be very standard among players, for what regards midfielders there's space for much more different players. 
+
+### Clustering
+
+```{r PremierLeague_Position_Midfielder_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=22, eps=0.6, pos='Midfielder', league='Premier League', sea='All', knn=FALSE)#, filter_V1=10, filter_V1_sign='lower_than', filter_V2='None', filter_V2_sign='greater_than')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1**: this cluster is made mainly by player who should have belong to cluster 6, but did not have the bodyweight so stay there, so they can be defined as lighter defensive midfielder (example Kovacic); and from players who chould have belong to cluster 2, but have a higher number of total succesfully passes, indicating a more complete physical midfielder (example Gundogan). 
+
+- **Cluster 2**: in this cluster the players collected has a not so high level of total passes completed; by the way it is very interesting the fact that they have a level of completed passes in its own half above the mean. Another important driver of this cluster is the high level of aerials duels won. Those hints indicates a very physical midfielder that tends to play safe in its own half when in possesion, but rarely participate to the manoveur in the last 30 meters. Some example are Dier, Partey and Emre Can. The exact position is usually the low vertex of a 3 midfield or containment mezzala. 
+
+- **Cluster 3**: in this cluster we talk about a very specific type of player. It shows a high level of completed passes both in its own half and in opposite half. Another distinctive characteristic is the rate of success of shots on target together with the low level of touch in opposition box, qualifying a sharp shooter from distance. The player is a box-to-box mezzala who likes to be present in all the construction phases, who gives geometry, and like to conclude from outside the box. Examples are Jorginho (even if he play in a 2 midfield, his style is consistent with the above described), Van De Beek and Wijnaldum.
+
+- **Cluster 4**: this cluster is driven only by passing skills. The determinant variables are succesful passes in opposition half and succesful passes in own half. We are facing very technical players, box-to-box playmakers with a very hybrid position on the field. It is very interesting to point out the fact that almost all Manchester City midfielders fall in this category: this gives a very clear indication on the team playstyle and on the coach indications (create a cobweb of passages to mantain ball possession in each field zone). Manchester City examples are Phil Foden, Bernardo Silva and Kevin De Bruyne. Consistent examples from other teams are James Rodriguez and Juan Mata. 
+
+- **Cluster 5**: this cluster collect players with low stats almost in everything. It is by the way interesting since it collects low-level midfielders, together with "great names" (which enjoy a top player status from previous seasons) at their worst career moment like Jesse Lingard, Dele Alli and Joao Mario. 
+
+- **Cluster 6**: the last cluster is made of very defensive midfielders. This is confirmed by the high level of passes in own half, the almost 0 level of shots and touches in opposition box. Another interesting characteristic is the high bodyweight indicating physical players who are strong in contrast. This type of player usually play in front of the defense in a 3 midfield like Fernandinho or Obiang, or right/left half in a 2 midfield like Allan. 
+
+
+### Cluster Distribution
+
+```{r PremierLeague_Position_Midfielder_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r PremierLeague_Position_Midfielder_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r PremierLeague_Position_Midfielder_Interpretation, warning=FALSE, messages=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Premier_MID_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Forward
+
+Like in the Serie A case, the main driver to subset forwards is the number of recoveris made. 
+
+### Clustering
+
+```{r PremierLeague_Position_Forward_Clustering, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=25, eps=0.7, pos='Forward', league='Premier League', sea='All', knn=FALSE)#, filter_V1=10, filter_V1_sign='lower_than', filter_V2='None', filter_V2_sign='greater_than')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 2**:  this cluster is composed by players with a recoveries level, which does not shot on target too much and who are not particularly tall. It is easy to infere we are seeing the classical old school wingers that do not score too often, go for the cross and play also defense. The examples are Theo Walcott, Moura and Saint-Maxime. 
+
+- **Cluster 3**: as for Serie A this forward cluster is driven only by a low level of recoveries and low level of succcesful passes in the opposition half. it identifies the box animals such as Aubameyang, Kane, Wellbeck and Ings.It has to be said that some results are controversial, since forwards such as Cavani and Vardy fall in this category even if they are famous for thier generosity in recoveries on the field. This could put a point mark on some player status (maybe they perform some highlight recover and nothing more).
+
+- **Cluster 4**: this cluster collects very complete forwards: the archetype of player in this cluster shot a lot on target, scores many gol and at the same time has a high level of passes in the opposition half meaning he is tightly involved in offensive manoveur. A very clear example of this is Liverpool trio Salah, Manè, Firmino which falls entirely in this cluser. Firmino for example is at the same time playmaker and finisher of Liverpool attack, while the two wings are a continuos foothold and at the same time great scorer. Examples from other teams are Rashford and Aguero. 
+
+### Cluster Distribution
+
+```{r PremierLeague_Position_Forward_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+### Cluster Evaluation
+
+```{r PremierLeague_Position_Forward_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r PremierLeague_Position_Forward_Interpretation, warning=FALSE, messages=FALSE}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Premier_FW_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+
+# Bundesliga
+
+## All Positions (excl. GK)
+
+Here we find five clusters, plus the outliers. The lower number of overall clusters, compared to other leagues, suggests that the Bundesliga teams are more homogeneous in their style of play. Indeed, the four-men defense is by far the most used by the top teams (except for Eintrach Frankfurt), together with two technical and versatile central midfielders in front of it. Moreover, there is a large preference in almost every team for attacking  with short passes rather than crosses and long balls.
+These regularities are consistent also with the League's economic scenario, where the majority of a club's shares is owned by the supporters.
+
+### Clustering
+
+```{r B_All_positions, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=12}
+
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=35, eps=0.55, pos='All', league='Bundesliga', sea='All')
+
+plot_grid(listCluster[[5]], listCluster[[6]], listCluster[[7]], align = "v", nrow = 3, rel_heights=c(1/3, 1/3, 1/3))
+
+```
+
+- **Cluster 1** is where, as usual, we find the outliers. It includes Serge Gnabry, Axel Witsel, Joshua Kimmich, Marco Reus, Philippe Coutinho.
+
+- **Cluster 2** is the one that groups the largest number of players, and includes almost all the forwards, together with some very prolific winger and some inside forward (it is characterised by high touches in opponents box and high chances created). Includes players like: Kai Havertz, Raphael Guerreiro, Jadon Sancho, Kingsley Coman, Robert Lewandowski, Thomas Muller, Erling Haaland, Yussuf Poulsen, Andre Silva.
+
+- **Cluster 3** is made of low technically skilled centre backs and defensive midfielders, essentially those players who block the opponents'play. Its players display high clearances and interceptions. Representative of this cluster are: Matija Nastasic, Nigel de Jong and Holger Badstuber.
+
+- **Cluster 4** groups half of the database's full-backs together with central and lateral midfielders. These players are characterised by good technical skills and a build-up phase with very few errors. Main features are high dribble success and high successful crosses. Some examples: Leon Goretzka, Nordi Mukiele, Alphonso Davies, Weston McKennie.
+
+- **Cluster 5** includes again mainly centre-backs and central defensive midfielders. With respect to Cluster 3, players here are better at starting the build-up phase with precise passing, rather than just defending. Most relevant features: high passing accuracy, high dribbling accuracy, high clearances. Most representative players: Mats Hummels, Ozan Kabak, Dayot Upamecano, Sven Bender.
+
+- **Cluster 6** includes the most offensive full-backs as well as those wingers who were not taken into consideration before. Main players: Jakub Blaszczykowski and Ryan Sessegnon.
+
+### Cluster Distribution
+
+```{r Global_Position_B_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Position")
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+
+### Cluster Evaluation
+
+```{r Global_Position_B_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r Global_Position_B_Interpretation, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Bundes_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+## Defenders
+
+The identified categories for the Bundesliga's defenders are essentially three: two for center-backs and one for full-backs. At a first sight, it is clear how the algorithm manages to separate very accurately central from lateral defenders in just two dimensions. As we will see in short, the main discriminants are the type and accuracy of passes, as well as the offensive contribution. For instance, while some players prefer to perform easy short passes and focus just on the defensive phase, some other attempt much more audacious moves that, when accurate, can bring to a high number of goals and assists.
+
+### Clustering
+
+```{r Bundes_Defenders, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=20, eps=0.65, pos='Defender', league='Bundesliga', sea='All')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1** is the usual outliers group. Center-backs and full-backs are equally present in this cluster (15 vs 16, respectively). The best players here differentiate from the rest for two maiin reasons: first of all, they score much more than the average and second, they are extremely precise in passing for all the zones of the pitch. David Alaba, Sead Kolasinac, Thomas Meunier and Wendell are the most representative players here.
+
+- **Cluster 2** essentially includes all those centre-backs that were already identified as cluster 3 in the overall analysis. Again, we find players whose major focus is on the defensive phase, so they are very precise in performing short passes and tackling, while the contribution to the build-up and attacking phases is negligible.
+
+- **Cluster 3** groups all those full-backs that are not considered as outliers. Inside this large category players with good dribbling skills, lower-than-average passing accuracy (with respect to the center-backs, they try more difficult passes in less dangerous zones) and a high number of successful crosses. The presence of a single category for lateral defenders is again consistent with the above cited homogeneity in the Bundesliga's tactical scenario. Among the other, the most known players are Lukasz Piszczek, Achraf Hakimi, Alphonso Davies.
+
+- **Cluster 4** is composed of physical, ball playing centre-backs. They are taller than the average defender and display a high passing accuracy together with a low crossing frequency. Moreover, they attempt very few dribbles, but they are extremely successful when they do (everybod who has ever played football knows how coaches get scared when one attempts a dribbling close to his own area) and they rarely lose the possession. They are also extremely successful in aerial duels and someone even manages to score two or three goals per season. Here are included players like Dayot Upamecano, Benjamin Pavard, Maxence Lacroix and some of the centre-backs that were already present in overall cluster 5. With respect to other leagues - particularly La Liga and Premier League - here the typical defensive "regista" is present but atypical. Indeed, consistently with the argument made above about the style of play in Bundesliga, we can see the importance of long passes rather than the short ones.
+
+### Cluster Distribution
+
+```{r Defeders_Bundes_Cluster_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+
+### Cluster Evaluation
+
+```{r Defenders_Bundes_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r Defenders_Bundes_Interpretation, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Bundes_DEF_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+
+## Midfielders
+
+As we have already seen, midfielders are always troublesome since they are by far those with the highest variability in the data. Moreover, in this particular case, some of the most discriminant variables (particularly goal conversion) are not so relevant for non offensive players. The other discriminants are all based on the offensive contribution in terms of goals, shots on target and chances created. Nonetheless, the partition we are proposing here cues some very interesting insights. Indeed, the algorithm is still able to identify very precisely those players for which the defensive characteristics are still predominant. This results in four clusters: one for the most offensive midfielders (both central and lateral), two for the rest of central midfielders, and a very small one for peculiar defensive midfielders. The large number of outliers, as argued below, is again due to Bundesliga's homogeneity.
+
+### Clustering
+
+```{r B_Midfielders, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=20, eps=0.60, pos='Midfielder', league='Bundesliga', sea='All')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1** many top level midfielders are present in this cluster. Some of them excel in the offensive production in terms of goals, assists, and touches in the opponents' box. Others are fundamental for their teams since they are also very successful in short passing, despite some are of high difficulty. Leon Goretzka, Arturo Vidal, Florian Neuhaus and Thiago Alcantara are here.
+
+- **Cluster 2** groups all those players which play an important role in the build-up and offensive phase. Here we find mostly attacking midfielders (the old number 10s) and wingers, but many central midfielders are still present (especially those who play in the three-men midfield). They distinguish from the rest for the high number of chances created, shots on target and presence in the opponents' box, while they do not excel for passing accuracy nor for their defensive contribution. Here we find Mario Gotze, Lars Stindl, Dani Olmo and the young star Florian Wirtz.
+
+- **Cluster 3** is formed by those midfielders displaying a high number of interceptions (key defensive indicator) and good short passing skills - high accuracy in both halves - which allow them to stop the opponents' play before it becomes too dangerous and pass the ball to their better skilled teammates. They rarely take part into the offensive phase with key passes or assists, but they are effective in those few times they have to shoot on goal. Main representatives: Thomas Delaney, Emre Can, Denis Zakaria.
+
+- **Cluster 4** is very similar to cluster 3. The main difference  is that here players display a much lower goal conversion rate (that is, a higher number of shots needed to score a goal). Gelson Fernandes and Albin Ekdal are such kind of midfielders.
+
+- **Cluster 5** only includes 12 players. They are those who split their career between center-back and defensive midfielder (like Sven Bender). No relevant characteristics are highlighted here.
+
+### Cluster Distribution
+
+```{r Midfielders_B_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+
+### Cluster Evaluation
+
+```{r Midfielders_B_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r Midfielders_B_Interpretation, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Bundes_MID_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
+
+## Forwards
+
+The case of Bundes' forwards allows us to perform a deep analysis. Indeed, our algorithm is able to distinguish five categories. Interestingly, most of the variability is encountered in defensive stats as recoveries and interceptions. The ability of actively contributing to the non-possession phase is becoming more and more required by the european managers, and the German league is very progressive with respect to this.
+
+### Clustering
+
+```{r B_Forward, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=8, fig.height=8}
+
+listCluster <- generateClusters(df, catVars, absVars, relVars, minPts=15, eps=0.56, pos='Forward', league='Bundesliga', sea='All')
+
+plot_grid(listCluster[[5]], listCluster[[7]], align = "v", nrow = 2, rel_heights=c(1/2, 1/2))
+```
+
+- **Cluster 1** for what regards center forwards, the outlier group is very heterogeneous. The common factor is that players here, despite displaying good offensive skills, are not exactly the ones that we would expect in a top players list. Rather, it is a proper cluster of anomalous players, where the combination of different characteristics makes them almost unique. The better known are Kevin-Prince Boateng, Serge Gnabry, Marco Reus and Andrej Kramaric.
+
+- **Cluster 2** is very large, and it is the one where the defensive characteristics are first visible, since there are many players who play as wingers that contribute a lot in terms of recoveries and tackles. Here shooting accuracy and successful dribbles are also relevant variables, even if none of the players belonging to this cluster has a high number of golas or assists. The technical level is quite low. Two thirds of the components are wingers, while the rest is made of pure strikers. Some members of the cluster are: Claudio Pizarro, Benito Raman, Justin Kluivert.
+
+- **Cluster 3** is almost entirely made of center forwards. All the most prolific strikers can be found here. It is curious to notice that the tree brings us to this cluster via two very different paths. On the one hand, most of the players have very high recoveries per game, while on the other one they are by far the most prolific players in this subset. A common denominator is a great presence in the opponents' box, which essentially means that this is the group of complete forwards. Illustrious components of the group are Robert Lewandowski, Erling Haaland, Andre Silva.
+
+- **Cluster 4** is very small and it includes few players with peculiar characteristics. With respect to cluster 3, to which it is the most similar, it also includes some wingers like Yevhen Konoplyanka.
+
+- **Cluster 5** includes mainly very offensive wingers. They are not really concerned with helping the team in non-possession phases, but they can be lethal with their dribbling and passing skills in case of counterattacks. This kind of creative winger is essential for each top team, so it is not by chance that Jadon Sancho, Kingsley Coman, Arjen Robben and Franck Ribery are part of this cluster.
+
+- **Cluster 6** is similar to cluster 5, with the only main difference lying behind the defensive contribution. Indeed, players in this cluster display a higher number of interceptions, clearances and recoveries with respect to their colleagues.
+
+
+### Cluster Distribution
+
+```{r Forward_B_Barplots, warning=FALSE}
+evaluateClusterDistribution(listCluster[[2]], var="Subrole")
+```
+
+
+### Cluster Evaluation
+
+```{r Forward_B_Evaluation, warning=FALSE}
+evaluateClusters(df_umap = listCluster[[3]], df_final = listCluster[[2]])
+```
+
+### Cluster Interpretation
+
+```{r Forward_B_Interpretation, warning=FALSE, messages=FALSE, echo=FALSE, fig.width=12, fig.height=8}
+listInt <- interpretClusters(df = listCluster[[1]], df_final = listCluster[[2]])
+
+cat("Decision Tree Accuracy: ", listInt[[2]]) # Decision Tree Accuracy
+listInt[[3]] # Feature Importance
+```
+
+### Cluster Composition
+
+```{r Bundes_FW_Cluster_Composition, warning=FALSE, results='asis'}
+df_players_clust <- listCluster[[2]] %>% group_by(position, full_name, team, cluster) %>% summarize(season=n())  %>% dcast(position+full_name+team ~ cluster, value.var = 'season') %>% replace(is.na(.), 0) %>% row_sums(4:length(.), n=2, var='Total', append = TRUE) %>% mutate(across(-c(position, full_name, team, Total), ~ . / Total)) %>% mutate_at(4:(length(.)-1), round, 2)
+
+clusters_cols <- df_players_clust %>% select(-c(position, full_name, team, Total)) %>% names(.) %>% paste("cl_", ., sep='')
+names(df_players_clust) <- c("Position", "Player", "Team", clusters_cols, "Total")
+
+for (clust in seq(length(clusters_cols))){
+  clust_col <- paste("cl_", clust, sep='')
+  print(df_players_clust %>% filter(!!as.symbol(clust_col)>0.5) %>% arrange(desc(!!as.symbol(clust_col)), desc(Total), Player) %>% kable(format="html", caption=paste("Cluster", clust)) %>% scroll_box(height="300px",  width="800px", fixed_thead=list(enabled=T, background="lightgrey")))
+}
+```
+
