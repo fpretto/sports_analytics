@@ -44,7 +44,7 @@ import classPlayerDetection
 sys.path.insert(0, cwd + '/04 - Court Mapping/')
 import classCourtMapping
 
-sys.path.insert(0, cwd + '/05 - Report Generation/')
+sys.path.insert(0, cwd + '/06 - Report Generation/')
 import classStatsGeneration
 
 importlib.reload(classSportClassifier)
@@ -111,8 +111,6 @@ CM = classCourtMapping.CourtMapping(court_img, court_coords)
 # Player Identification
 dictPlayers = PDT.identifyPlayers(video_path, video_name, dictPlayers, username, src_pts, output_path, video_name.split('.')[0] + date_suffix)
 
-dictPlayers['player_B']['label'] = 'Rodriguez'
-
 # Player Tracking
 start_time = datetime.now()
 dictPlayers, video_duration = PDT.detectPlayers(video_path, video_name, dictPlayers, username, src_pts, output_path, video_name.split('.')[0] + date_suffix, CM)
@@ -123,7 +121,8 @@ end_time-start_time
 #  COURT MAPPING
 ##########################################################################
 
-#dictPlayers = pkl.load(open('C:/GoogleDrive/LudisAI/99 - Ejecuciones/squash-trim_20200602/03_player_coords_squash-trim_20200602.pkl', 'rb'))
+dictPlayers = pkl.load(open('C:/GoogleDrive/LudisAI/99 - Ejecuciones/squash_rodriguez_matthew_20201031/03_player_coords_squash_rodriguez_matthew_20201031.pkl', 'rb'))
+video_duration = 42.93333333333333
 
 heatmap = CM.createHeatmap(dictPlayers['player_A']['2d_court_coords'], username, video_duration, bins=15)
 
@@ -135,8 +134,6 @@ heatmap = CM.createHeatmap(dictPlayers['player_A']['2d_court_coords'], username,
 #username = 'Nick Matthew'
 #video_name = 'squash-trim.avi'
 #video_duration = 791.8620689655172
-
-username = 'Matthew'
 
 RG = classStatsGeneration.ReportGeneration()
 RG.generateReport(dictPlayers, output_path, username, heatmap, video_name, video_duration, date)
